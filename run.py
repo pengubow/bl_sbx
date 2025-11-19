@@ -181,7 +181,7 @@ def main_callback(service_provider: LockdownClient, dvt: DvtSecureSocketProxySer
     
     click.secho("Respringing", fg="green")
     procs = OsTraceService(lockdown=service_provider).get_pid_list().get("Payload")
-    pid = next((pid for pid, p in procs.items() if p['ProcessName'] == 'SpringBoard'), None)
+    pid = next((pid for pid, p in procs.items() if p['ProcessName'] == 'backboardd'), None)
     pc.kill(pid)
     
     click.secho("Done!", fg="green")
