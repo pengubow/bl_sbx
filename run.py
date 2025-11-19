@@ -4,13 +4,19 @@ import traceback
 import subprocess
 import atexit
 import concurrent
+import os
 import posixpath
+import queue
+import socket
 import sqlite3
 import shutil
 import time
+import threading
+import functools
 import plistlib
 from pathlib import Path
 from threading import Timer
+from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 import asyncio
 import click
@@ -31,7 +37,26 @@ from pymobiledevice3.services.os_trace import OsTraceService
 from pymobiledevice3.remote.remote_service_discovery import RemoteServiceDiscoveryService
 from pymobiledevice3.services.dvt.instruments.process_control import ProcessControl
 
+def get_lan_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    finally:
+        s.close()
+
+def start_http_server():
+    handler = functools.partial(SimpleHTTPRequestHandler)
+    httpd = HTTPServer(("0.0.0.0", 0), handler)
+    info_queue.put((get_lan_ip(), httpd.server_port))
+    httpd.serve_forever()
+
 def main_callback(service_provider: LockdownClient, dvt: DvtSecureSocketProxyService):
+    http_thread = threading.Thread(target=start_http_server, daemon=True)
+    http_thread.start()
+    ip, port = info_queue.get()
+    print(f"Hosting temporary http server on: http://{ip}:{port}/")
+
     afc = AfcService(lockdown=service_provider)
     pc = ProcessControl(dvt)
     
@@ -63,17 +88,31 @@ def main_callback(service_provider: LockdownClient, dvt: DvtSecureSocketProxySer
     shutil.copyfile("downloads.28.sqlitedb", "tmp.downloads.28.sqlitedb")
     conn = sqlite3.connect("tmp.downloads.28.sqlitedb")
     cursor = conn.cursor()
+    bldb_local_prefix = f"/private/var/containers/Shared/SystemGroup/{uuid}/Documents/BLDatabaseManager/BLDatabaseManager.sqlite"
     cursor.execute(f"""
     UPDATE asset
     SET local_path = CASE
-        WHEN local_path LIKE '/private/var/containers/Shared/SystemGroup/%/Documents/BLDatabaseManager/BLDatabaseManager.sqlite'
-            THEN '/private/var/containers/Shared/SystemGroup/{uuid}/Documents/BLDatabaseManager/BLDatabaseManager.sqlite'
-        WHEN local_path LIKE '/private/var/containers/Shared/SystemGroup/%/Documents/BLDatabaseManager/BLDatabaseManager.sqlite-shm'
-            THEN '/private/var/containers/Shared/SystemGroup/{uuid}/Documents/BLDatabaseManager/BLDatabaseManager.sqlite-shm'
-        WHEN local_path LIKE '/private/var/containers/Shared/SystemGroup/%/Documents/BLDatabaseManager/BLDatabaseManager.sqlite-wal'
-            THEN '/private/var/containers/Shared/SystemGroup/{uuid}/Documents/BLDatabaseManager/BLDatabaseManager.sqlite-wal'
+        WHEN local_path LIKE '%/BLDatabaseManager.sqlite'
+            THEN '{bldb_local_prefix}'
+        WHEN local_path LIKE '%/BLDatabaseManager.sqlite-shm'
+            THEN '{bldb_local_prefix}-shm'
+        WHEN local_path LIKE '%/BLDatabaseManager.sqlite-wal'
+            THEN '{bldb_local_prefix}-wal'
     END
     WHERE local_path LIKE '/private/var/containers/Shared/SystemGroup/%/Documents/BLDatabaseManager/BLDatabaseManager.sqlite%'
+    """)
+    bldb_server_prefix = f"http://{ip}:{port}/BLDatabaseManager.sqlite"
+    cursor.execute(f"""
+    UPDATE asset
+    SET url = CASE
+        WHEN url LIKE '%/BLDatabaseManager.sqlite'
+            THEN '{bldb_server_prefix}'
+        WHEN url LIKE '%/BLDatabaseManager.sqlite-shm'
+            THEN '{bldb_server_prefix}-shm'
+        WHEN url LIKE '%/BLDatabaseManager.sqlite-wal'
+            THEN '{bldb_server_prefix}-wal'
+    END
+    WHERE url LIKE '%/BLDatabaseManager.sqlite%'
     """)
     conn.commit()
             
@@ -82,7 +121,7 @@ def main_callback(service_provider: LockdownClient, dvt: DvtSecureSocketProxySer
     pid_bookassetd = next((pid for pid, p in procs.items() if p['ProcessName'] == 'bookassetd'), None)
     pid_books = next((pid for pid, p in procs.items() if p['ProcessName'] == 'Books'), None)
     if pid_bookassetd:
-        click.secho(f"Killing bookassetd pid {pid_bookassetd}...", fg="yellow")
+        click.secho(f"Stopping bookassetd pid {pid_bookassetd}...", fg="yellow")
         pc.signal(pid_bookassetd, 19)
     if pid_books:
         click.secho(f"Killing Books pid {pid_books}...", fg="yellow")
@@ -139,7 +178,14 @@ def main_callback(service_provider: LockdownClient, dvt: DvtSecureSocketProxySer
                 success_message in syslog_entry.message:
             break
     pc.kill(pid_bookassetd)
+    
+    click.secho("Respringing", fg="green")
+    procs = OsTraceService(lockdown=service_provider).get_pid_list().get("Payload")
+    pid = next((pid for pid, p in procs.items() if p['ProcessName'] == 'SpringBoard'), None)
+    pc.kill(pid)
+    
     click.secho("Done!", fg="green")
+    
     sys.exit(0)
 
 def _run_async_rsd_connection(address, port):
@@ -222,7 +268,7 @@ async def connection_context(udid):# Create a LockdownClient instance
     except OSError:  # no route to host (Intel fix)
         pass
     except DeviceNotFoundError:
-        raise Exception("Device not found. Make sure it's unlocked.")
+        click.secho("Device not found. Make sure it's unlocked.", fg="red")
     except Exception as e:
         raise Exception(f"Connection not established... {e}")
 
@@ -230,6 +276,8 @@ if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Usage: python run.py <udid> /path/to/Global.plist")
         exit(1)
-        
+    
     mg_file = sys.argv[2]
+    info_queue = queue.Queue()
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
     asyncio.run(connection_context(sys.argv[1]))
