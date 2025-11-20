@@ -229,7 +229,7 @@ def exit_func(tunnel_proc):
 
 async def create_tunnel(udid):
     # TODO: check for Windows
-    tunnel_process = subprocess.Popen(f"sudo /home/pengubow/venv/bin/python3 -m pymobiledevice3 lockdown start-tunnel --script-mode --udid {udid}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    tunnel_process = subprocess.Popen(f"sudo pymobiledevice3 lockdown start-tunnel --script-mode --udid {udid}", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     atexit.register(exit_func, tunnel_process)
     while True:
         output = tunnel_process.stdout.readline()
@@ -302,12 +302,119 @@ async def connection_context(udid):# Create a LockdownClient instance
         raise Exception(f"Connection not established... {e}")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print("Usage: python run.py <udid> /path/to/file (ex. ./MobileGestalt/com.apple.MobileGestalt.plist) /path/to/file_on_iOS (like /private/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist)")
-        exit(1)
-    
-    overridefile = sys.argv[2]
-    path = sys.argv[3]
+
+    print("\n==============================")
+    print("   Detecting connected iOS devices")
+    print("==============================\n")
+
+    detected_devices = []  # [(name, udid)]
+
+    try:
+        output = subprocess.check_output(
+            "pymobiledevice3 usbmux list",
+            shell=True,
+            stderr=subprocess.STDOUT
+        ).decode("utf-8", errors="ignore")
+
+        print(output)
+
+        # Attempt JSON parse (new pymobiledevice3 output)
+        import json
+        try:
+            devices_json = json.loads(output)
+            for entry in devices_json:
+                if entry.get("ConnectionType") != "USB":
+                    continue
+
+                name = entry.get("DeviceName", "Unknown Device")
+                udid = entry.get("UniqueDeviceID")
+
+                if udid:
+                    detected_devices.append((name, udid))
+        except:
+            pass
+
+        # Legacy fallback
+        if not detected_devices:
+            temp_name = None
+            temp_udid = None
+            temp_conn = None
+
+            for line in output.splitlines():
+                line = line.strip()
+
+                if "DeviceName" in line:
+                    temp_name = line.split(":", 1)[1].strip()
+
+                if "ConnectionType" in line:
+                    temp_conn = line.split(":", 1)[1].strip()
+
+                if "SerialNumber" in line or "UniqueDeviceID" in line:
+                    temp_udid = line.split(":", 1)[1].strip()
+
+                if temp_name and temp_udid and temp_conn:
+                    if temp_conn == "USB":
+                        detected_devices.append((temp_name, temp_udid))
+                    temp_name = None
+                    temp_udid = None
+                    temp_conn = None
+
+    except Exception as e:
+        print(f"Could not auto-detect devices: {e}")
+
+    print("\nHow to find your UDID:")
+    print("• Run:  pymobiledevice3 usbmux list")
+
+    # AUTO SELECT if 1 USB device
+    if len(detected_devices) == 1:
+        devname, udid = detected_devices[0]
+        print(f"Detected 1 device via USB:\n{devname} – {udid}\nUsing automatically...\n")
+
+    elif len(detected_devices) > 1:
+        print("Detected device(s):")
+        for idx, (devname, udid) in enumerate(detected_devices, 1):
+            print(f"{idx}) {devname} – {udid}")
+
+        choice_device = input("\nSelect number OR press ENTER to type manually: ").strip()
+
+        if choice_device.isdigit() and 1 <= int(choice_device) <= len(detected_devices):
+            udid = detected_devices[int(choice_device) - 1][1]
+        else:
+            udid = input("Enter UDID manually: ").strip()
+
+    else:
+        udid = input("Enter your device UDID: ").strip()
+
+    print("\n==============================")
+    print(" Select operation")
+    print("==============================\n")
+    print("1) MobileGestalt")
+    print("2) FeatureFlags (Global.plist)")
+    print("3) Custom file paths\n")
+
+    choice = input("Enter option (1-4): ").strip()
+
+    if choice == "1":
+        overridefile = "./MobileGestalt/com.apple.MobileGestalt.plist"
+        path = "/private/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist"
+
+    elif choice == "2":
+        print("\n⚠️  IMPORTANT: Feature Flags Warning ⚠️")
+        print("---------------------------------------")
+        print("You MUST have a 'FeatureFlags' folder on your iOS device.")
+        print("Enable it using a Nugget .batter file.\n")
+
+        overridefile = "./FeatureFlags/Global.plist"
+        path = "/private/var/preferences/FeatureFlags/Global.plist"
+
+    elif choice == "3":
+        overridefile = input("Enter path to LOCAL file: ").strip()
+        path = input("Enter path on the iOS DEVICE: ").strip()
+
+    else:
+        print("Invalid option.")
+        sys.exit(1)
+
     info_queue = queue.Queue()
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
-    asyncio.run(connection_context(sys.argv[1]))
+    asyncio.run(connection_context(udid))

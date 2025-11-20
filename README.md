@@ -1,4 +1,4 @@
-# bl_sbx
+# bl_sbx-WithOptions
 ## itunesstored & bookassetd Sandbox Escape
 
 This repository contains a proof-of-concept demonstrating how maliciously crafted `downloads.28.sqlitedb` and `BLDatabaseManager.sqlite` databases can escape the sandbox of **itunesstored** and **bookassetd** on iOS. By abusing their download mechanisms, the POC enables writing arbitrary `mobile`-owned files to restricted locations in `/private/var/`, including MobileGestalt cache files—allowing device modifications such as spoofing the device type.

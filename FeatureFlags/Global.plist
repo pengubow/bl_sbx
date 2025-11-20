@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>SpringBoard</key>
+	<dict>
+		<key>Maglev</key>
+		<dict>
+			<key>Enabled</key>
+			<true/>
+		</dict>
+		<key>AutobahnQuickSwitchTransition</key>
+		<dict>
+			<key>Enabled</key>
+			<true/>
+		</dict>
+		<key>SlipSwitch</key>
+		<dict>
+			<key>Enabled</key>
+			<true/>
+		</dict>
+		<key>PosterEditorKashida</key>
+		<dict>
+			<key>Enabled</key>
+			<true/>
+		</dict>
+		<key>Domino</key>
+		<dict>
+			<key>Enabled</key>
+			<true/>
+		</dict>
+		<key>SuperDomino</key>
+		<dict>
+			<key>Enabled</key>
+			<true/>
+		</dict>
+		<key>SwiftUITimeAnimation</key>
+		<dict>
+			<key>Enabled</key>
+			<true/>
+		</dict>
+	</dict>
+</dict>
+</plist>
